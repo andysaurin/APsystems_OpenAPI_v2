@@ -1,0 +1,127 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "APsystems OpenAPI",
+        "description": "Enter your APsystems OpenAPI credentials and polling preferences.",
+        "data": {
+          "inverter_telemetry": "Collect inverter telemetry",
+          "batch_power": "Collect daily batch power data",
+          "app_id": "App ID",
+          "app_secret": "App Secret",
+          "sid": "System ID (SID)",
+          "base_url": "API base URL",
+          "auto_scan_interval": "Automatically optimise polling interval",
+          "scan_interval": "Polling interval (seconds)",
+          "sunrise_offset": "Sunrise offset (minutes)",
+          "sunset_offset": "Sunset offset (minutes)"
+        },
+        "data_description": {
+          "inverter_telemetry": "Creates the per-inverter sensors and buttons. Costs 1 API call per inverter per day. Turning this off removes the inverter devices.",
+          "batch_power": "Fetches the whole day's power series once per ECU at 23:00 (1 API call per ECU per day). Nothing displays it; it only appears in the diagnostics download.",
+          "sid": "System ID as shown in EMA.",
+          "auto_scan_interval": "When enabled, the polling interval is sized automatically to stay within the API quota. Disable to use the fixed interval below.",
+          "scan_interval": "Seconds between API calls during solar hours (1800-7200). Ignored when automatic optimisation is enabled.",
+          "sunrise_offset": "Minutes to wait after sunrise before starting API calls (0-120).",
+          "sunset_offset": "Minutes to keep polling after sunset before stopping (0-120)."
+        }
+      },
+      "reauth_confirm": {
+        "title": "Re-authenticate APsystems",
+        "description": "The App Secret was rejected. Enter the current App Secret.",
+        "data": {
+          "app_secret": "App Secret"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not connect to the APsystems API. Check your network and base URL.",
+      "invalid_auth": "Authentication failed. Check your App ID and App Secret.",
+      "invalid_system": "This System ID was not accepted for your account.",
+      "rate_limited": "API call limit reached or too many requests. Try again later.",
+      "unknown": "Unexpected error"
+    },
+    "abort": {
+      "already_configured": "This System ID is already configured.",
+      "reauth_successful": "Re-authentication was successful."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "APsystems OpenAPI options",
+        "description": "Adjust how often the integration polls the APsystems API and which optional features are collected.\n\nWith the saved settings the integration uses an estimated **{estimate}** API calls per month in the busiest season (allowance reported by the original project: {quota}). The estimate refreshes after you save.",
+        "data": {
+          "inverter_telemetry": "Collect inverter telemetry",
+          "batch_power": "Collect daily batch power data",
+          "auto_scan_interval": "Automatically optimise polling interval",
+          "scan_interval": "Polling interval (seconds)",
+          "sunrise_offset": "Sunrise offset (minutes)",
+          "sunset_offset": "Sunset offset (minutes)"
+        },
+        "data_description": {
+          "inverter_telemetry": "Creates the per-inverter sensors and buttons. Costs 1 API call per inverter per day. Turning this off removes the inverter devices.",
+          "batch_power": "Fetches the whole day's power series once per ECU at 23:00 (1 API call per ECU per day). Nothing displays it; it only appears in the diagnostics download.",
+          "auto_scan_interval": "When enabled, the polling interval is sized automatically to stay within the API quota, taking the optional features above into account. Disable to use the fixed interval below.",
+          "scan_interval": "Seconds between API calls during solar hours (1800-7200). Ignored when automatic optimisation is enabled.",
+          "sunrise_offset": "Minutes to wait after sunrise before starting API calls (0-120).",
+          "sunset_offset": "Minutes to keep polling after sunset before stopping (0-120)."
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "total_energy": {
+        "name": "Total Energy"
+      },
+      "today_energy": {
+        "name": "Today Energy"
+      },
+      "power": {
+        "name": "Power"
+      },
+      "dc_power_ch1": {
+        "name": "DC Power Ch1"
+      },
+      "dc_power_ch2": {
+        "name": "DC Power Ch2"
+      },
+      "dc_voltage_ch1": {
+        "name": "DC Voltage Ch1"
+      },
+      "dc_voltage_ch2": {
+        "name": "DC Voltage Ch2"
+      },
+      "dc_current_ch1": {
+        "name": "DC Current Ch1"
+      },
+      "dc_current_ch2": {
+        "name": "DC Current Ch2"
+      },
+      "ac_voltage": {
+        "name": "AC Voltage"
+      },
+      "frequency": {
+        "name": "Frequency"
+      },
+      "temperature": {
+        "name": "Temperature"
+      }
+    },
+    "button": {
+      "scan_inverters": {
+        "name": "Scan Inverters"
+      },
+      "refresh_inverter_energy": {
+        "name": "Refresh Inverter Data"
+      }
+    }
+  },
+  "issues": {
+    "api_limit": {
+      "title": "APsystems API limit reached",
+      "description": "The APsystems OpenAPI reported: {reason}.\n\nData updates are paused until the limit resets. To stay under the monthly quota, increase the polling interval under Settings > Devices & services > APsystems OpenAPI > Configure."
+    }
+  }
+}

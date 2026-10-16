@@ -40,7 +40,7 @@ APsystems limits the number of API calls per account. The original project docum
 ### HACS (recommended)
 
 1. In Home Assistant open **HACS → ⋮ → Custom repositories**.
-2. Add `https://github.com/emlynmac/apsystems-openapi` with category **Integration**.
+2. Add `https://github.com/andysaurin/APsystems_OpenAPI_v2` with category **Integration**.
 3. Search for **APsystems OpenAPI** in HACS, click **Download**, and restart Home Assistant.
 
 ### Manual

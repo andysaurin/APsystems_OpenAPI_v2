@@ -13,6 +13,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.const import (
+    PERCENTAGE,
     UnitOfElectricCurrent,
     UnitOfElectricPotential,
     UnitOfEnergy,
@@ -91,6 +92,28 @@ async def async_setup_entry(
     if coordinator.telemetry_enabled:
         _add_new_inverters()
         entry.async_on_unload(coordinator.async_add_listener(_add_new_inverters))
+
+    # Storage (battery) sensors: one device per storage ECU found in the ECU list.
+    known_storage: set[str] = set()
+
+    @callback
+    def _add_new_storage() -> None:
+        new: list[SensorEntity] = []
+        for ecu in coordinator.storage_ecus:
+            if ecu["eid"] in known_storage:
+                continue
+            known_storage.add(ecu["eid"])
+            new.append(ApsystemsStorageSocSensor(coordinator, ecu))
+            new.extend(
+                ApsystemsStorageEnergySensor(coordinator, ecu, d)
+                for d in STORAGE_ENERGY_SENSORS
+            )
+        if new:
+            async_add_entities(new)
+
+    if coordinator.storage_enabled:
+        _add_new_storage()
+        entry.async_on_unload(coordinator.async_add_listener(_add_new_storage))
 
 
 class ApsystemsBaseEntity(CoordinatorEntity[ApsystemsCoordinator], SensorEntity):
@@ -321,4 +344,120 @@ class ApsystemsInverterPowerSensor(ApsystemsInverterSensor):
             "hourly_dc_p2": dc_p2,
             "hourly_times": self._series("t"),
             "data_date": self._data.get("inverter_energy_date"),
+        }
+
+
+# --------------------------------------------------------------------------- #
+# Storage sensors (APsystems battery system, manual 3.6)
+# --------------------------------------------------------------------------- #
+@dataclass(frozen=True, kw_only=True)
+class ApsystemsStorageSensorDescription(SensorEntityDescription):
+    """`summary_field` is the key inside summary["lifetime"] (kWh)."""
+
+    summary_field: str
+
+
+def _storage_desc(key: str, field: str, enabled: bool = True) -> ApsystemsStorageSensorDescription:
+    return ApsystemsStorageSensorDescription(
+        key=key,
+        translation_key=key,
+        summary_field=field,
+        device_class=SensorDeviceClass.ENERGY,
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        entity_registry_enabled_default=enabled,
+    )
+
+
+# `key` doubles as the unique-id suffix and must not change (keeps entity history).
+# Battery and grid sensors are on by default; the other two are redundant with
+# the solar/home figures Home Assistant derives itself, so they start disabled.
+STORAGE_ENERGY_SENSORS: tuple[ApsystemsStorageSensorDescription, ...] = (
+    _storage_desc("battery_charged", "charge"),
+    _storage_desc("battery_discharged", "discharge"),
+    _storage_desc("grid_import", "imported"),
+    _storage_desc("grid_export", "exported"),
+    _storage_desc("home_consumed", "consumed", enabled=False),
+    _storage_desc("solar_produced", "produced", enabled=False),
+)
+
+
+class ApsystemsStorageBase(ApsystemsBaseEntity):
+    """Shared device info and data access for one storage ECU."""
+
+    def __init__(
+        self, coordinator: ApsystemsCoordinator, ecu: dict[str, Any], key: str
+    ) -> None:
+        self._eid = ecu["eid"]
+        self._capacity = _to_float(ecu.get("capacity"))
+        super().__init__(coordinator, f"storage_{self._eid}_{key}")
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, self._eid)},
+            manufacturer="APsystems",
+            name=f"Storage {self._eid}",
+            model=ecu.get("model") or "Storage",
+            via_device=(DOMAIN, self._sid),
+        )
+
+    @property
+    def _storage(self) -> dict[str, Any]:
+        return (self._data.get("storage") or {}).get(self._eid) or {}
+
+
+class ApsystemsStorageEnergySensor(ApsystemsStorageBase, RestoreEntity):
+    """Lifetime kWh of one storage flow, for the Energy dashboard."""
+
+    entity_description: ApsystemsStorageSensorDescription
+
+    def __init__(
+        self,
+        coordinator: ApsystemsCoordinator,
+        ecu: dict[str, Any],
+        description: ApsystemsStorageSensorDescription,
+    ) -> None:
+        super().__init__(coordinator, ecu, description.key)
+        self.entity_description = description
+        self._last_valid_value: float | None = None
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        if (last_state := await self.async_get_last_state()) is not None:
+            val = _to_float(last_state.state)
+            if val is not None and val > 0:
+                self._last_valid_value = val
+
+    @property
+    def native_value(self) -> StateType:
+        lifetime = (self._storage.get("summary") or {}).get("lifetime") or {}
+        val = _to_float(lifetime.get(self.entity_description.summary_field))
+        if val is not None and val > 0:
+            self._last_valid_value = val
+            return val
+        return self._last_valid_value
+
+
+class ApsystemsStorageSocSensor(ApsystemsStorageBase):
+    """Battery state of charge from the latest storage status."""
+
+    _attr_translation_key = "battery_soc"
+    _attr_device_class = SensorDeviceClass.BATTERY
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = PERCENTAGE
+
+    def __init__(self, coordinator: ApsystemsCoordinator, ecu: dict[str, Any]) -> None:
+        super().__init__(coordinator, ecu, "soc")
+
+    @property
+    def native_value(self) -> StateType:
+        return _to_float((self._storage.get("latest") or {}).get("soc"))
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        latest = self._storage.get("latest") or {}
+        return {
+            "mode": latest.get("mode"),
+            "reading_time": latest.get("time"),
+            "capacity_kwh": self._capacity,
+            "latest_reading": latest,
+            "fetched": self._storage.get("fetched"),
         }

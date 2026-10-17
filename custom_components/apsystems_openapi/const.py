@@ -16,8 +16,13 @@ CONF_SUNSET_OFFSET = "sunset_offset"  # minutes
 # Optional features that spend additional API calls
 CONF_INVERTER_TELEMETRY = "inverter_telemetry"  # 1 call per inverter per day
 CONF_BATCH_POWER = "batch_power"  # 1 call per ECU per day (diagnostics only)
+CONF_STORAGE = "storage_data"  # 2 calls per storage ECU on EVERY poll (summary + latest)
 DEFAULT_INVERTER_TELEMETRY = True  # matches earlier versions
 DEFAULT_BATCH_POWER = False  # nothing displays this data, so off unless wanted
+DEFAULT_STORAGE = False  # needs an APsystems storage system (e.g. ELT-12); off unless wanted
+
+# API "type" value of an ECU with storage activated (ECU list, manual 3.1.2)
+STORAGE_ECU_TYPE = 2
 
 FALLBACK_SCAN_INTERVAL = 1800  # seconds, default before auto-sizing kicks in
 DEFAULT_OFFSET = 30  # minutes
@@ -39,6 +44,9 @@ DEFAULT_SCAN_INTERVAL = 3600  # seconds (hourly energy)
 # Inverter energy (minutely power/voltage/temperature) is fetched once
 # per day at 12:30 when panels should be active and producing.
 
+# Storage data (summary + latest) is fetched on every poll during solar hours,
+# so the Energy dashboard totals for battery and grid keep up with the day.
+
 # ── Monthly API budget review (6 inverters, 1 ECU) ─────────────────────────
 # The coordinator runs every `scan_interval` seconds and makes 1 "hourly"
 # system-energy call per cycle *during solar hours* (≈ 30 min after sunrise
@@ -46,11 +54,12 @@ DEFAULT_SCAN_INTERVAL = 3600  # seconds (hourly energy)
 #
 # Per day, with cycle interval I seconds and L solar hours:
 #   Hourly system energy:  (3600 / I) × L            (every cycle in daylight)
+#   Storage (optional):    (3600 / I) × L × S        (S = 2 calls per storage ECU)
 #   Sunrise re-trigger:    1
 #   Daily summary:         1
 #   Inverter energy:       6   (once/day, one call per inverter at 12:30)
 #   Batch power (per ECU): 1   (once/day at 23:00)
-# Per-day total ≈ (3600/I)·L + 9   →   Monthly ≈ 30·((3600/I)·L + 9)
+# Per-day total ≈ (3600/I)·L·(1+S) + 9   →   Monthly ≈ 30·((3600/I)·L·(1+S) + 9)
 #
 #   I = 1800s (30 min — the ACTUAL default):
 #       L=8  (winter)  ≈ 720      L=11 (shoulder) ≈ 930
@@ -61,8 +70,9 @@ DEFAULT_SCAN_INTERVAL = 3600  # seconds (hourly energy)
 #
 # Conclusion: at the default 30-min interval, long summer days push usage
 # OVER the 1000 calls/month quota.  Raise the scan interval to 3600s to stay
-# safe.  The integration now logs an error and raises a Home Assistant
-# persistent notification whenever the API reports the limit was exceeded.
+# safe.  The integration logs an error and raises a Home Assistant Repairs
+# issue whenever the API reports the limit was exceeded.  Enabling storage
+# data roughly triples the per-poll cost, so the automatic interval grows.
 
 # ── API rate-limit / access-limit response codes ───────────────────────────
 # APsystems returns HTTP 200 with one of these codes in the JSON body when the
@@ -114,15 +124,17 @@ def estimate_monthly_calls(
     num_inverters: int,
     num_ecus: int = 1,
     sunrise_offset_min: int = 30,
+    num_storage: int = 0,
 ) -> int:
     """Estimate worst-case monthly API calls for a given scan interval.
 
-    Daily calls = (3600/interval)·window  (hourly system energy, every cycle
-    during the solar window) + 1 sunrise re-trigger + 1 daily summary +
+    Per poll during the solar window: 1 hourly system-energy call plus
+    ``num_storage`` storage calls (2 per storage ECU: summary + latest).
+    Per day on top of that: 1 sunrise re-trigger + 1 daily summary +
     num_inverters (per-inverter energy) + num_ecus (batch power).
     """
     window = max(0.0, max_daylight_hours(latitude) - sunrise_offset_min / 60.0)
-    hourly_per_day = (3600.0 / interval_s) * window
+    hourly_per_day = (3600.0 / interval_s) * window * (1 + num_storage)
     daily_fixed = 2 + num_inverters + num_ecus
     return round(DAYS_PER_MONTH * (hourly_per_day + daily_fixed))
 
@@ -134,11 +146,13 @@ def recommended_scan_interval(
     sunrise_offset_min: int = 30,
     quota: int = MONTHLY_API_QUOTA,
     safety: float = API_QUOTA_SAFETY,
+    num_storage: int = 0,
 ) -> int:
     """Smallest scan interval (seconds) that keeps the busiest month under quota.
 
-    Solves DAYS·((3600/I)·window + daily_fixed) ≤ quota·safety for I, then
-    rounds up to SCAN_INTERVAL_STEP and clamps to [MIN, MAX]_SCAN_INTERVAL.
+    Solves DAYS·((3600/I)·window·(1+S) + daily_fixed) ≤ quota·safety for I,
+    then rounds up to SCAN_INTERVAL_STEP and clamps to
+    [MIN, MAX]_SCAN_INTERVAL.
     """
     window = max(0.0, max_daylight_hours(latitude) - sunrise_offset_min / 60.0)
     daily_fixed = 2 + num_inverters + num_ecus
@@ -148,6 +162,6 @@ def recommended_scan_interval(
         # Fixed daily calls alone already blow the budget (or polar night) —
         # poll as slowly as allowed.
         return MAX_SCAN_INTERVAL
-    interval = window * 3600.0 / remaining
+    interval = window * 3600.0 * (1 + num_storage) / remaining
     interval = _math.ceil(interval / SCAN_INTERVAL_STEP) * SCAN_INTERVAL_STEP
     return max(MIN_SCAN_INTERVAL, min(MAX_SCAN_INTERVAL, int(interval)))

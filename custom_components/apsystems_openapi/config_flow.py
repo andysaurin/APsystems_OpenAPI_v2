@@ -34,12 +34,14 @@ from .const import (
     CONF_INVERTER_TELEMETRY,
     CONF_SCAN_INTERVAL,
     CONF_SID,
+    CONF_STORAGE,
     CONF_SUNRISE_OFFSET,
     CONF_SUNSET_OFFSET,
     DEFAULT_BASE_URL,
     DEFAULT_BATCH_POWER,
     DEFAULT_INVERTER_TELEMETRY,
     DEFAULT_OFFSET,
+    DEFAULT_STORAGE,
     DOMAIN,
     FALLBACK_SCAN_INTERVAL,
     MAX_SCAN_INTERVAL,
@@ -55,6 +57,7 @@ _PASSWORD = TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD))
 OPTION_KEYS = (
     CONF_INVERTER_TELEMETRY,
     CONF_BATCH_POWER,
+    CONF_STORAGE,
     CONF_AUTO_SCAN_INTERVAL,
     CONF_SCAN_INTERVAL,
     CONF_SUNRISE_OFFSET,
@@ -70,6 +73,9 @@ def _polling_schema(current: Mapping[str, Any]) -> dict:
         ): bool,
         vol.Optional(
             CONF_BATCH_POWER, default=current.get(CONF_BATCH_POWER, DEFAULT_BATCH_POWER)
+        ): bool,
+        vol.Optional(
+            CONF_STORAGE, default=current.get(CONF_STORAGE, DEFAULT_STORAGE)
         ): bool,
         vol.Optional(
             CONF_AUTO_SCAN_INTERVAL, default=current.get(CONF_AUTO_SCAN_INTERVAL, True)

@@ -7,6 +7,7 @@
         "data": {
           "inverter_telemetry": "Collect inverter telemetry",
           "batch_power": "Collect daily batch power data",
+          "storage_data": "Collect battery/storage data",
           "app_id": "App ID",
           "app_secret": "App Secret",
           "sid": "System ID (SID)",
@@ -19,6 +20,7 @@
         "data_description": {
           "inverter_telemetry": "Creates the per-inverter sensors and buttons. Costs 1 API call per inverter per day. Turning this off removes the inverter devices.",
           "batch_power": "Fetches the whole day's power series once per ECU at 23:00 (1 API call per ECU per day). Nothing displays it; it only appears in the diagnostics download.",
+          "storage_data": "Creates a device per storage ECU (e.g. ELT-12) with battery state of charge and lifetime battery, grid import and grid export energy for the Energy dashboard. Costs 2 API calls per storage ECU on every poll, so the automatic polling interval gets longer. Only for systems with an APsystems battery.",
           "sid": "System ID as shown in EMA.",
           "auto_scan_interval": "When enabled, the polling interval is sized automatically to stay within the API quota. Disable to use the fixed interval below.",
           "scan_interval": "Seconds between API calls during solar hours (1800-7200). Ignored when automatic optimisation is enabled.",
@@ -54,6 +56,7 @@
         "data": {
           "inverter_telemetry": "Collect inverter telemetry",
           "batch_power": "Collect daily batch power data",
+          "storage_data": "Collect battery/storage data",
           "auto_scan_interval": "Automatically optimise polling interval",
           "scan_interval": "Polling interval (seconds)",
           "sunrise_offset": "Sunrise offset (minutes)",
@@ -62,6 +65,7 @@
         "data_description": {
           "inverter_telemetry": "Creates the per-inverter sensors and buttons. Costs 1 API call per inverter per day. Turning this off removes the inverter devices.",
           "batch_power": "Fetches the whole day's power series once per ECU at 23:00 (1 API call per ECU per day). Nothing displays it; it only appears in the diagnostics download.",
+          "storage_data": "Creates a device per storage ECU (e.g. ELT-12) with battery state of charge and lifetime battery, grid import and grid export energy for the Energy dashboard. Costs 2 API calls per storage ECU on every poll, so the automatic polling interval gets longer. Only for systems with an APsystems battery.",
           "auto_scan_interval": "When enabled, the polling interval is sized automatically to stay within the API quota, taking the optional features above into account. Disable to use the fixed interval below.",
           "scan_interval": "Seconds between API calls during solar hours (1800-7200). Ignored when automatic optimisation is enabled.",
           "sunrise_offset": "Minutes to wait after sunrise before starting API calls (0-120).",
@@ -107,6 +111,27 @@
       },
       "temperature": {
         "name": "Temperature"
+      },
+      "battery_soc": {
+        "name": "Battery State of Charge"
+      },
+      "battery_charged": {
+        "name": "Battery Charged Energy"
+      },
+      "battery_discharged": {
+        "name": "Battery Discharged Energy"
+      },
+      "grid_import": {
+        "name": "Grid Import Energy"
+      },
+      "grid_export": {
+        "name": "Grid Export Energy"
+      },
+      "home_consumed": {
+        "name": "Home Consumed Energy"
+      },
+      "solar_produced": {
+        "name": "Solar Produced Energy"
       }
     },
     "button": {

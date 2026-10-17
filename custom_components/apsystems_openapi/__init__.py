@@ -71,22 +71,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: ApsystemsConfigEntry) ->
         async_track_time_change(hass, _refresh, hour=0, minute=0, second=0)
     )
 
-    # -- Remove devices for inverters the API no longer reports -------------- #
+    # -- Remove devices for inverters / storage ECUs the API no longer reports - #
     @callback
     def _prune_stale_inverter_devices() -> None:
+        live_ids = {entry.data[CONF_SID]}
         if coordinator.telemetry_enabled:
             inverters = coordinator.inverters
             if not inverters:  # never prune on a transient empty list
                 return
-            live_ids = {entry.data[CONF_SID]} | {inv["uid"] for inv in inverters}
-        else:
-            # Telemetry switched off: inverter devices and their entities are removed
-            live_ids = {entry.data[CONF_SID]}
+            live_ids |= {inv["uid"] for inv in inverters}
+        # else: telemetry switched off, so inverter devices and their entities are removed
+        if coordinator.storage_enabled:
+            if not coordinator.storage_ecus:  # never prune on a transient empty list
+                return
+            live_ids |= {ecu["eid"] for ecu in coordinator.storage_ecus}
+        # else: storage switched off, so the storage device and its entities are removed
         device_reg = dr.async_get(hass)
         for device in dr.async_entries_for_config_entry(device_reg, entry.entry_id):
             ids = {ident for (domain, ident) in device.identifiers if domain == DOMAIN}
             if ids and ids.isdisjoint(live_ids):
-                _LOGGER.info("Removing stale APsystems inverter device %s", ", ".join(sorted(ids)))
+                _LOGGER.info("Removing stale APsystems device %s", ", ".join(sorted(ids)))
                 device_reg.async_update_device(device.id, remove_config_entry_id=entry.entry_id)
 
     _remove_disabled_buttons(hass, entry, coordinator)
@@ -127,9 +131,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: ApsystemsConfigEntry) -
 async def async_remove_config_entry_device(
     hass: HomeAssistant, entry: ApsystemsConfigEntry, device: dr.DeviceEntry
 ) -> bool:
-    """Allow deleting an inverter device from the UI once it is no longer reported."""
+    """Allow deleting an inverter or storage device from the UI once it is no longer reported."""
     ids = {ident for (domain, ident) in device.identifiers if domain == DOMAIN}
     if entry.data[CONF_SID] in ids:
         return False  # the system device goes away by deleting the integration
-    live = {inv["uid"] for inv in (entry.runtime_data.inverters or [])}
+    coordinator = entry.runtime_data
+    live = {inv["uid"] for inv in (coordinator.inverters or [])}
+    if coordinator.storage_enabled:
+        live |= {ecu["eid"] for ecu in coordinator.storage_ecus}
     return ids.isdisjoint(live)

@@ -4,6 +4,9 @@
 Keeps the original polling strategy (solar hours only, summary once per day near
 the end of the solar day, per-inverter telemetry once a day after 12:30, batch
 power once a day at 23:00) but as a proper DataUpdateCoordinator.
+
+Optionally (2.0.1) it also polls the storage ECU(s) of an APsystems battery
+system (summary + latest status) on every poll during solar hours.
 """
 from __future__ import annotations
 
@@ -34,16 +37,19 @@ from .const import (
     CONF_INVERTER_TELEMETRY,
     CONF_SCAN_INTERVAL,
     CONF_SID,
+    CONF_STORAGE,
     CONF_SUNRISE_OFFSET,
     CONF_SUNSET_OFFSET,
     DEFAULT_BATCH_POWER,
     DEFAULT_INVERTER_TELEMETRY,
     DEFAULT_OFFSET,
+    DEFAULT_STORAGE,
     DOMAIN,
     FALLBACK_SCAN_INTERVAL,
     INVERTER_ENERGY_HOUR,
     INVERTER_ENERGY_MINUTE,
     MONTHLY_API_QUOTA,
+    STORAGE_ECU_TYPE,
     estimate_monthly_calls,
     recommended_scan_interval,
 )
@@ -82,6 +88,10 @@ class ApsystemsCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.inverter_energy_date: str | None = None
         self.batch_power: dict[str, Any] = {}
         self.batch_power_date: str | None = None
+        # Discovered storage ECUs: [{"eid", "model", "capacity"}]
+        self.storage_ecus: list[dict[str, Any]] = []
+        # Latest storage data per ECU id: {"summary": {...}, "latest": {...}, "fetched": iso}
+        self.storage: dict[str, dict[str, Any]] = {}
         self.solar_active = False
         self._window_end: datetime | None = None
         self._summary: dict[str, Any] | None = None
@@ -131,6 +141,16 @@ class ApsystemsCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Daily batch power fetch: one call per ECU per day."""
         return bool(self._opt(CONF_BATCH_POWER, DEFAULT_BATCH_POWER))
 
+    @property
+    def storage_enabled(self) -> bool:
+        """Battery/storage data: two calls per storage ECU on every poll."""
+        return bool(self._opt(CONF_STORAGE, DEFAULT_STORAGE))
+
+    @property
+    def _storage_calls_per_poll(self) -> int:
+        """Extra calls per poll (summary + latest for each storage ECU)."""
+        return 2 * len(self.storage_ecus) if self.storage_enabled else 0
+
     # ------------------------------------------------------------------ #
     # API budget
     # ------------------------------------------------------------------ #
@@ -157,6 +177,7 @@ class ApsystemsCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             n_inverters,
             n_ecus,
             int(self._opt(CONF_SUNRISE_OFFSET, DEFAULT_OFFSET)),
+            self._storage_calls_per_poll,
         )
 
     def apply_auto_interval(self) -> None:
@@ -169,6 +190,7 @@ class ApsystemsCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 n_inverters,
                 n_ecus,
                 int(self._opt(CONF_SUNRISE_OFFSET, DEFAULT_OFFSET)),
+                num_storage=self._storage_calls_per_poll,
             )
             self.update_interval = timedelta(seconds=recommended)
         estimate = self.estimated_monthly_calls()
@@ -178,11 +200,12 @@ class ApsystemsCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         _LOGGER.log(
             logging.WARNING if estimate > MONTHLY_API_QUOTA else logging.INFO,
             "APsystems %s: polling every %d s, telemetry for %d inverter(s), batch power for "
-            "%d ECU(s) - est. %d calls/month (quota %d)",
+            "%d ECU(s), %d storage call(s) per poll - est. %d calls/month (quota %d)",
             self.sid,
             int(self.update_interval.total_seconds()) if self.update_interval else 0,
             n_inverters,
             n_ecus,
+            self._storage_calls_per_poll,
             estimate,
             MONTHLY_API_QUOTA,
         )
@@ -227,6 +250,7 @@ class ApsystemsCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "inverter_energy_date": self.inverter_energy_date,
             "batch_power": self.batch_power,
             "batch_power_date": self.batch_power_date,
+            "storage": self.storage,
         }
 
     def _push(self) -> None:
@@ -255,7 +279,21 @@ class ApsystemsCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             for inv in ecu.get("inverter") or []
         ]
         self.inverters = parsed
-        _LOGGER.info("Discovered %d inverter(s)", len(parsed))
+        # An ECU with storage activated (e.g. ELT-12) has type 2 and no inverters
+        self.storage_ecus = [
+            {
+                "eid": ecu["eid"],
+                "model": ecu.get("model") or "",
+                "capacity": ecu.get("capacity"),
+            }
+            for ecu in raw
+            if ecu.get("type") == STORAGE_ECU_TYPE
+        ]
+        _LOGGER.info(
+            "Discovered %d inverter(s) and %d storage ECU(s)",
+            len(parsed),
+            len(self.storage_ecus),
+        )
         if push:
             self._push()
         return parsed
@@ -319,6 +357,40 @@ class ApsystemsCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._push()
         return batch
 
+    async def async_refresh_storage(self, push: bool = True) -> dict[str, dict[str, Any]]:
+        """Summary and latest status of every storage ECU (two calls each)."""
+        if not self.storage_enabled:
+            return {}
+        limited = False
+        for ecu in self.storage_ecus:
+            eid = ecu["eid"]
+            entry = dict(self.storage.get(eid) or {})
+            for key, fetch in (
+                ("summary", self.client.get_storage_summary),
+                ("latest", self.client.get_storage_latest),
+            ):
+                try:
+                    data = await self._optional(fetch(self.sid, eid))
+                except APsystemsRateLimitError as err:
+                    self._report_limit(err)
+                    limited = True
+                    break
+                except APsystemsAuthError:
+                    raise
+                except (APsystemsError, *_COMM_ERRORS) as err:
+                    _LOGGER.warning("Failed to fetch storage %s for ECU %s: %s", key, eid, err)
+                    continue
+                if data:
+                    entry[key] = data
+            entry["fetched"] = dt_util.now().isoformat()
+            self.storage[eid] = entry
+            if limited:
+                break
+        _LOGGER.info("Storage data fetched (%d ECU(s))", len(self.storage))
+        if push:
+            self._push()
+        return self.storage
+
     # ------------------------------------------------------------------ #
     # Regular poll
     # ------------------------------------------------------------------ #
@@ -326,13 +398,17 @@ class ApsystemsCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._update_solar_state()
         try:
             if self.inverters is None:
-                if self.telemetry_enabled or self.batch_power_enabled:
+                if self.telemetry_enabled or self.batch_power_enabled or self.storage_enabled:
                     await self.async_refresh_inverter_list(push=False)
                 else:
                     self.inverters = []  # nothing needs it: save the call
 
             if not self.solar_active:
                 _LOGGER.debug("Outside solar hours, returning cached data")
+                # Fetch storage once if nothing is cached yet (e.g. after a restart
+                # at night) so the entities have values; no repeat calls after that.
+                if self.storage_enabled and self.storage_ecus and not self.storage:
+                    await self.async_refresh_storage(push=False)
                 return self._snapshot()
 
             date_str = dt_util.now().date().isoformat()
@@ -343,6 +419,9 @@ class ApsystemsCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._date = date_str
 
             await self._maybe_fetch_summary(date_str)
+
+            if self.storage_enabled:
+                await self.async_refresh_storage(push=False)
 
             now = dt_util.now()
             past_energy_time = (now.hour, now.minute) >= (

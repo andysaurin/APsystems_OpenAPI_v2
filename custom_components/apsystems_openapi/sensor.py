@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -108,6 +108,15 @@ async def async_setup_entry(
                 ApsystemsStorageEnergySensor(coordinator, ecu, d)
                 for d in STORAGE_ENERGY_SENSORS
             )
+            new.extend(
+                ApsystemsStorageTodaySensor(coordinator, ecu, d)
+                for d in STORAGE_TODAY_SENSORS
+            )
+            new.extend(
+                ApsystemsStoragePowerSensor(coordinator, ecu, d)
+                for d in STORAGE_POWER_SENSORS
+            )
+            new.append(ApsystemsStorageLastReadingSensor(coordinator, ecu))
         if new:
             async_add_entities(new)
 
@@ -370,15 +379,23 @@ def _storage_desc(key: str, field: str, enabled: bool = True) -> ApsystemsStorag
 
 
 # `key` doubles as the unique-id suffix and must not change (keeps entity history).
-# Battery and grid sensors are on by default; the other two are redundant with
-# the solar/home figures Home Assistant derives itself, so they start disabled.
 STORAGE_ENERGY_SENSORS: tuple[ApsystemsStorageSensorDescription, ...] = (
     _storage_desc("battery_charged", "charge"),
     _storage_desc("battery_discharged", "discharge"),
     _storage_desc("grid_import", "imported"),
     _storage_desc("grid_export", "exported"),
-    _storage_desc("home_consumed", "consumed", enabled=False),
-    _storage_desc("solar_produced", "produced", enabled=False),
+    _storage_desc("home_consumed", "consumed"),
+    _storage_desc("solar_produced", "produced"),
+)
+
+# Same six values for "today" (resets at midnight; from the storage summary).
+STORAGE_TODAY_SENSORS: tuple[ApsystemsStorageSensorDescription, ...] = (
+    _storage_desc("battery_charged_today", "charge"),
+    _storage_desc("battery_discharged_today", "discharge"),
+    _storage_desc("grid_import_today", "imported"),
+    _storage_desc("grid_export_today", "exported"),
+    _storage_desc("home_consumed_today", "consumed"),
+    _storage_desc("solar_produced_today", "produced"),
 )
 
 
@@ -461,3 +478,136 @@ class ApsystemsStorageSocSensor(ApsystemsStorageBase):
             "latest_reading": latest,
             "fetched": self._storage.get("fetched"),
         }
+
+
+class ApsystemsStorageTodaySensor(ApsystemsStorageBase):
+    """Energy of one storage flow since midnight (kWh), from the storage summary.
+
+    The summary is not fetched at night. A value cached on an earlier day is reported
+    as unknown instead of being shown as today's, until the first poll of the new day.
+    """
+
+    entity_description: ApsystemsStorageSensorDescription
+
+    def __init__(
+        self,
+        coordinator: ApsystemsCoordinator,
+        ecu: dict[str, Any],
+        description: ApsystemsStorageSensorDescription,
+    ) -> None:
+        super().__init__(coordinator, ecu, description.key)
+        self.entity_description = description
+
+    @property
+    def native_value(self) -> StateType:
+        fetched = dt_util.parse_datetime(self._storage.get("summary_fetched") or "")
+        if fetched is None or dt_util.as_local(fetched).date() != dt_util.now().date():
+            return None
+        today = (self._storage.get("summary") or {}).get("today") or {}
+        return _to_float(today.get(self.entity_description.summary_field))
+
+
+@dataclass(frozen=True, kw_only=True)
+class ApsystemsStoragePowerDescription(SensorEntityDescription):
+    """`latest_field` is the key inside the storage "latest" reading."""
+
+    latest_field: str
+
+
+def _power_desc(key: str, field: str) -> ApsystemsStoragePowerDescription:
+    return ApsystemsStoragePowerDescription(
+        key=key,
+        translation_key=key,
+        latest_field=field,
+        device_class=SensorDeviceClass.POWER,
+        native_unit_of_measurement=UnitOfPower.WATT,
+        state_class=SensorStateClass.MEASUREMENT,
+    )
+
+
+# The manual labels these "power" without a unit; the values balance as watts.
+# `key` doubles as the unique-id suffix and must not change.
+STORAGE_POWER_SENSORS: tuple[ApsystemsStoragePowerDescription, ...] = (
+    _power_desc("battery_charge_power", "charge"),
+    _power_desc("battery_discharge_power", "discharge"),
+    _power_desc("grid_import_power", "imported"),
+    _power_desc("grid_export_power", "exported"),
+    _power_desc("home_power", "consumed"),
+    _power_desc("solar_power", "produced"),
+)
+
+
+class ApsystemsStoragePowerSensor(ApsystemsStorageBase):
+    """Last reported power of one storage flow (a snapshot, not a live value).
+
+    The cloud reading is only fetched once per poll (30 minutes to 2 hours) and
+    is not refreshed at night, so a value older than two poll intervals is
+    reported as unknown instead of looking current.
+    """
+
+    entity_description: ApsystemsStoragePowerDescription
+
+    def __init__(
+        self,
+        coordinator: ApsystemsCoordinator,
+        ecu: dict[str, Any],
+        description: ApsystemsStoragePowerDescription,
+    ) -> None:
+        super().__init__(coordinator, ecu, description.key)
+        self.entity_description = description
+
+    @property
+    def _is_fresh(self) -> bool:
+        fetched = dt_util.parse_datetime(self._storage.get("latest_fetched") or "")
+        if fetched is None:
+            return False
+        interval = self.coordinator.update_interval or timedelta(minutes=30)
+        return dt_util.now() - fetched <= 2 * interval + timedelta(minutes=10)
+
+    @property
+    def native_value(self) -> StateType:
+        if not self._is_fresh:
+            return None
+        latest = self._storage.get("latest") or {}
+        return _to_float(latest.get(self.entity_description.latest_field))
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        latest = self._storage.get("latest") or {}
+        return {
+            "reading_time": latest.get("time"),
+            "fetched": self._storage.get("latest_fetched"),
+        }
+
+
+class ApsystemsStorageLastReadingSensor(ApsystemsStorageBase):
+    """When the cloud's latest storage reading was taken.
+
+    The API gives only a time of day (HH:mm); the date is taken from when the reading
+    was fetched, minus one day if that would put it in the future.
+    """
+
+    _attr_translation_key = "last_reading"
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+
+    def __init__(self, coordinator: ApsystemsCoordinator, ecu: dict[str, Any]) -> None:
+        super().__init__(coordinator, ecu, "last_reading")
+
+    @property
+    def native_value(self) -> StateType:
+        fetched = dt_util.parse_datetime(self._storage.get("latest_fetched") or "")
+        raw_time = (self._storage.get("latest") or {}).get("time")
+        if fetched is None or not raw_time:
+            return None
+        try:
+            hour, minute = (int(part) for part in str(raw_time).split(":")[:2])
+        except ValueError:
+            return None
+        local = dt_util.as_local(fetched)
+        try:
+            reading = local.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        except ValueError:
+            return None
+        if reading > local + timedelta(minutes=1):  # reading from the previous day
+            reading -= timedelta(days=1)
+        return reading

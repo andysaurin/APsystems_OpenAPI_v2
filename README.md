@@ -5,6 +5,8 @@
 
 A custom [Home Assistant](https://www.home-assistant.io/) integration that reads solar production data from the APsystems OpenAPI cloud service (the same data you see in the EMA app and website).
 
+Version 2 also incorporates battery information from ALT or ELK systems if available
+
 It exposes your system's lifetime and daily energy for the Energy dashboard, plus optional per-inverter telemetry (AC/DC power, voltage, current, frequency and temperature).
 
 > Forked from <https://blackhole.nmrc.org/solar/apsystems-openapi>. Version 2 is a rewrite of the integration internals against the APsystems OpenAPI User Manual v1.8 (July 2025) and current Home Assistant conventions. Entity unique IDs are unchanged from earlier versions, so existing history and dashboards carry over. See the [changelog](CHANGELOG.md).

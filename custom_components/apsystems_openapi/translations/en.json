@@ -132,6 +132,45 @@
       },
       "solar_produced": {
         "name": "Solar Produced Energy"
+      },
+      "battery_charge_power": {
+        "name": "Battery Charge Power"
+      },
+      "battery_discharge_power": {
+        "name": "Battery Discharge Power"
+      },
+      "grid_import_power": {
+        "name": "Grid Import Power"
+      },
+      "grid_export_power": {
+        "name": "Grid Export Power"
+      },
+      "home_power": {
+        "name": "Home Power"
+      },
+      "solar_power": {
+        "name": "Solar Power"
+      },
+      "battery_charged_today": {
+        "name": "Battery Charged Energy Today"
+      },
+      "battery_discharged_today": {
+        "name": "Battery Discharged Energy Today"
+      },
+      "grid_import_today": {
+        "name": "Grid Import Energy Today"
+      },
+      "grid_export_today": {
+        "name": "Grid Export Energy Today"
+      },
+      "home_consumed_today": {
+        "name": "Home Consumed Energy Today"
+      },
+      "solar_produced_today": {
+        "name": "Solar Produced Energy Today"
+      },
+      "last_reading": {
+        "name": "Last Reading"
       }
     },
     "button": {

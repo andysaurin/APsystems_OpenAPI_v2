@@ -382,6 +382,7 @@ class ApsystemsCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     continue
                 if data:
                     entry[key] = data
+                    entry[f"{key}_fetched"] = dt_util.now().isoformat()
             entry["fetched"] = dt_util.now().isoformat()
             self.storage[eid] = entry
             if limited:

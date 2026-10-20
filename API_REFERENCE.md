@@ -1,4 +1,4 @@
-# APsystems OpenAPI â developer notes
+# APsystems OpenAPI – developer notes
 
 Unofficial notes on the parts of the APsystems OpenAPI that this integration uses,
 plus behaviour observed on a real system. These are summaries in our own words, not a
@@ -85,14 +85,14 @@ ECU, and its `eid` is what the storage endpoints expect.
 
 ## 4. Storage data
 
-### Latest status â `storage/latest/{eid}`
+### Latest status – `storage/latest/{eid}`
 
 Fields, all strings: `mode`, `soc` (battery state of charge, **%**), `time`
 (`HH:mm` of the reading) and the last readings for `discharge`, `charge`, `produced`,
 `consumed`, `exported`, `imported`. The manual labels the last six as "power" without
 a unit.
 
-### Summary â `storage/summary/{eid}`
+### Summary – `storage/summary/{eid}`
 
 Four maps, `today`, `month`, `year` and `lifetime`, each holding the cumulative
 energy for `discharge`, `charge`, `produced`, `consumed`, `exported` and `imported`.
@@ -107,7 +107,7 @@ Home Assistant Energy dashboard:
 | `exported` | return to grid |
 | `consumed` / `produced` | home consumption / solar production (HA derives these itself) |
 
-### Period â `storage/period/{eid}`
+### Period – `storage/period/{eid}`
 
 For `hourly` to `yearly` levels the data holds a `time` list plus one list per
 field above. For `minutely` it holds a `today` map and `time`, `power` and `energy`
@@ -124,7 +124,7 @@ battery ECU (type 2, 5.76 kWh), system type 3. Identifiers are omitted here.
 - Storage summary values were cumulative kWh strings, with four decimals for
   `today` and three for the other periods.
 - The energy balance held to within 0.1 % for a day:
-  `produced + imported + discharge â consumed + exported + charge`
+  `produced + imported + discharge ≈ consumed + exported + charge`
   (25.109 against 25.124 kWh in the sample).
 - For a battery installed this year, `lifetime` equalled `year` exactly.
 - In `storage/latest` the six reading fields (`discharge`, `charge`, `produced`,
@@ -146,14 +146,14 @@ HTTP status is 200 even for errors; the JSON `code` field carries the result.
 | 0 | success |
 | 1000 | data exception (the integration treats this as "no data") |
 | 1001 | no data |
-| 2000 â 2005 | account problems: invalid, not authorised, expired, no permission (2004), **access limit exceeded (2005)** |
-| 3000 â 3004 | token problems |
+| 2000 – 2005 | account problems: invalid, not authorised, expired, no permission (2004), **access limit exceeded (2005)** |
+| 3000 – 3004 | token problems |
 | 4000, 4001 | request parameter errors (also returned for an unknown system id) |
 | 5000 | internal server error |
 | 6000 | communication error |
-| 7000 â 7003 | server restrictions: access limit (7001), too many requests (7002), system busy (7003) |
+| 7000 – 7003 | server restrictions: access limit (7001), too many requests (7002), system busy (7003) |
 
-Codes 2005 and 7001 â 7003 are the rate-limit family that raises the integration's
+Codes 2005 and 7001 – 7003 are the rate-limit family that raises the integration's
 Repairs issue.
 
 ## 7. Call budget
@@ -162,4 +162,3 @@ The original project documents a quota of 1000 calls per month; check the terms 
 your own account. Each poll during solar hours costs one hourly system call, plus two
 more per storage ECU when storage data is enabled. See `const.py` for the budget
 maths and the integration's options dialog for the current estimate.
-
